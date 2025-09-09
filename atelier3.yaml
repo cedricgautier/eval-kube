@@ -1,0 +1,150 @@
+# Atelier 3 : Déployer une application avec réplication et persistance
+# Ce fichier contient les ressources pour déployer MySQL avec persistance et réplication
+# dans le namespace production
+
+---
+# PersistentVolumeClaim pour stocker les données MySQL de manière persistante
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+  namespace: production
+  labels:
+    app: mysql
+spec:
+  accessModes:
+    - ReadWriteOnce  # Un seul Pod peut écrire à la fois
+  resources:
+    requests:
+      storage: 1Gi   # 1Gi comme spécifié dans l'énoncé
+  # storageClassName: default  # Utilise la classe de stockage par défaut
+
+---
+# ConfigMap pour les variables d'environnement MySQL
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+  namespace: production
+  labels:
+    app: mysql
+data:
+  MYSQL_ROOT_PASSWORD: "admin123"  # Mot de passe root comme spécifié
+  MYSQL_DATABASE: "myapp_database"         # Base de données optionnelle
+  MYSQL_USER: "admin"            # Utilisateur optionnel
+  MYSQL_PASSWORD: "admin123"        # Mot de passe utilisateur optionnel
+
+---
+# StatefulSet MySQL avec 2 réplicas et volumes persistants séparés
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-deploy
+  namespace: production
+  labels:
+    app: mysql
+spec:
+  serviceName: mysql-service  # Service pour StatefulSet
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.4.6  # Version spécifiée dans l'énoncé
+        ports:
+        - containerPort: 3306
+          name: mysql
+          protocol: TCP
+        env:
+        # Variables d'environnement depuis le ConfigMap
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            configMapKeyRef:
+              name: mysql-config
+              key: MYSQL_ROOT_PASSWORD
+        - name: MYSQL_DATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: mysql-config
+              key: MYSQL_DATABASE
+        - name: MYSQL_USER
+          valueFrom:
+            configMapKeyRef:
+              name: mysql-config
+              key: MYSQL_USER
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            configMapKeyRef:
+              name: mysql-config
+              key: MYSQL_PASSWORD
+        # Montage du volume persistant
+        volumeMounts:
+        - name: mysql-storage
+          mountPath: /var/lib/mysql  # Répertoire de données MySQL
+        # Configuration des ressources
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        # Probe de santé
+        livenessProbe:
+          exec:
+            command:
+            - mysqladmin
+            - ping
+            - -h
+            - localhost
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - mysql
+            - -h
+            - localhost
+            - -u
+            - root
+            - -padmin123
+            - -e
+            - "SELECT 1"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+  # Template de volume pour chaque Pod (chaque Pod aura son propre PVC)
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql-storage
+      labels:
+        app: mysql
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi
+
+---
+# Service ClusterIP pour exposer MySQL en interne
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-service  # Nom spécifié dans l'énoncé (msql-service corrigé)
+  namespace: production
+  labels:
+    app: mysql
+spec:
+  type: ClusterIP  # Service interne au cluster
+  selector:
+    app: mysql
+  ports:
+  - name: mysql
+    port: 3306       # Port MySQL standard
+    targetPort: 3306 # Port du conteneur
+    protocol: TCP
