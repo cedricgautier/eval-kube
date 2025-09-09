@@ -1,0 +1,74 @@
+# Atelier 1 : Déploiement d'une application web
+# Ce fichier contient les ressources nécessaires pour déployer une application web nginx
+# dans un environnement Kubernetes avec namespace, deployment et service
+
+---
+# Création du namespace 'production' pour isoler les ressources
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    purpose: atelier1
+    
+---
+# Deployment pour déployer l'application web nginx
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app-deploy
+  namespace: production  # Déployé dans le namespace production
+  labels:
+    app: web-app
+spec:
+  replicas: 1  # Un seul Pod comme demandé
+  selector:
+    matchLabels:
+      app: web-app
+      env: cedric
+  template:
+    metadata:
+      labels:
+        app: web-app
+        env: cedric
+    spec:
+      containers:
+      - name: web-app  # Nom du conteneur
+        image: nginx:1.28.0  # Image nginx spécifiée
+        ports:
+        - containerPort: 80  # Port exposé par nginx
+          protocol: TCP
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        # Vérification que le conteneur est prêt
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
+
+---
+# Service pour exposer l'application web
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-app-svc
+  namespace: production  # Service dans le même namespace
+  labels:
+    app: web-app
+spec:
+  type: ClusterIP  # Service interne au cluster
+  selector:
+    app: web-app  # Sélectionne les Pods avec le label app=web-app
+    env: cedric   # Remplacer 'cedric' par votre prénom
+  ports:
+  - name: http
+    port: 8080      # Port exposé par le service
+    targetPort: 80  # Port du conteneur nginx (redirection vers port 80)
+    protocol: TCP
