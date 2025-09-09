@@ -1,6 +1,6 @@
-# Atelier 1 : Déploiement d'une application web
-# Ce fichier contient les ressources nécessaires pour déployer une application web nginx
-# dans un environnement Kubernetes avec namespace, deployment et service
+# Atelier 2 : Déploiement évolutif et résilient
+# Ce fichier contient les ressources pour déployer une application web nginx scalable
+# avec HPA et Ingress pour une application critique
 
 ---
 # Création du namespace 'production' pour isoler les ressources
@@ -9,7 +9,7 @@ kind: Namespace
 metadata:
   name: production
   labels:
-    purpose: atelier1
+    purpose: atelier2
     
 ---
 # Deployment pour déployer l'application web nginx
@@ -21,7 +21,7 @@ metadata:
   labels:
     app: web-app
 spec:
-  replicas: 1  # Un seul Pod comme demandé
+  replicas: 2  # Nombre initial de répliques pour la résilience
   selector:
     matchLabels:
       app: web-app
@@ -41,10 +41,10 @@ spec:
         resources:
           requests:
             memory: "64Mi"
-            cpu: "50m"
+            cpu: "100m"  # CPU request nécessaire pour HPA
           limits:
             memory: "128Mi"
-            cpu: "100m"
+            cpu: "200m"
         # Vérification que le conteneur est prêt
         readinessProbe:
           httpGet:
@@ -69,6 +69,74 @@ spec:
     env: cedric   # Remplacer 'cedric' par votre prénom
   ports:
   - name: http
-    port: 8080      # Port exposé par le service
-    targetPort: 80  # Port du conteneur nginx (redirection vers port 80)
+    port: 80        # Port standard HTTP pour Ingress
+    targetPort: 80  # Port du conteneur nginx
     protocol: TCP
+
+---
+# HPA (Horizontal Pod Autoscaler) pour la scalabilité automatique
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web-app-hpa
+  namespace: production
+  labels:
+    app: web-app
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web-app-deploy
+  minReplicas: 1          # Minimum 1 Pod
+  maxReplicas: 5          # Maximum 5 Pods comme spécifié
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50  # Maintenir l'utilisation CPU à 50%
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60    # Attendre 60s avant de scaler up
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 300   # Attendre 5min avant de scaler down
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+
+---
+# Ingress pour exposer l'application critique à l'extérieur
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-app-ingress
+  namespace: production
+  labels:
+    app: web-app
+  annotations:
+    # Annotations communes pour la plupart des contrôleurs Ingress
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:
+  - host: web-app.local  # Domaine local pour les tests
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-app-svc
+            port:
+              number: 80
+  # Configuration TLS optionnelle (à décommenter si certificat disponible)
+  # tls:
+  # - hosts:
+  #   - web-app.local
+  #   secretName: web-app-tls
